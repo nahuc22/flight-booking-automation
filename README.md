@@ -22,6 +22,7 @@ Coding exercise for candidates: Automated testing for a flight booking component
 
 ## ✅ Implement automatic deployment using GitHub Actions
   - Create a GitHub Actions workflow to build and deploy the lambda
+  - Environment variables are stored in GitHub environment: `automation`
 
 ## 🧰 Technical Features
 

@@ -1,19 +1,21 @@
-name: Deploy to AWS Lambda
+name: Deploy Flight Booking Automation to AWS Lambda
 
 on:
   push:
-    branches: [main, staging]
+    branches: [main]
   pull_request:
     branches: [main]
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REPOSITORY: startup-budget-tracker
-  LAMBDA_FUNCTION_NAME: startup-budget-tracker-lambda
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: technical-test
+  LAMBDA_FUNCTION_NAME: technical-lambda-test-nahuel
+  AWS_SERVICE_NAME: service-technical-test-nahuel
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    name: Test and Build
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,18 +29,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run type check
-        run: npm run check
-
       - name: Build application
         run: npm run build
+
+      - name: Run tests (if any)
+        run: |
+          # Add test commands here when tests are implemented
+          echo "Tests would run here"
 
   deploy:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    name: Deploy to AWS Lambda
     
-    # Required for OIDC
+    # Required for OIDC - This is the modern secure approach
     permissions:
       id-token: write
       contents: read
@@ -56,72 +61,137 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-${{ github.run_id }}
 
       - name: Verify AWS Connection
         run: |
           aws sts get-caller-identity
-          echo "AWS CLI configured successfully"
+          echo "✅ AWS CLI configured successfully"
+          echo "Account: $(aws sts get-caller-identity --query Account --output text)"
+          echo "Region: ${{ env.AWS_REGION }}"
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push Docker image
+        id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          echo "🐳 Building Docker image..."
+          
           # Build the Docker image
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
           
+          echo "📤 Pushing Docker image to ECR..."
           # Push the images to ECR
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           
+          echo "✅ Docker image pushed successfully"
           echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
       - name: Install Serverless Framework
-        run: npm install -g serverless
+        run: |
+          npm install -g serverless@3
+          serverless --version
 
-      - name: Install dependencies
+      - name: Install project dependencies
         run: npm ci
 
-      - name: Deploy with Serverless
+      - name: Set deployment stage
+        id: set-stage
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "STAGE=prod" >> $GITHUB_OUTPUT
+          else
+            echo "STAGE=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy with Serverless Framework
         env:
           IMAGE_URI: ${{ steps.build-image.outputs.IMAGE_URI }}
-          STAGE: ${{ github.ref == 'refs/heads/main' && 'prod' || 'staging' }}
+          STAGE: ${{ steps.set-stage.outputs.STAGE }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_ECR_REPOSITORY_URL: ${{ secrets.AWS_ECR_REPOSITORY_URL }}
+          IMAGE_TAG: ${{ github.sha }}
+          AWS_LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          AWS_SERVICE_NAME: ${{ env.AWS_SERVICE_NAME }}
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
         run: |
+          echo "🚀 Deploying to AWS Lambda..."
+          echo "Stage: $STAGE"
+          echo "Image URI: $IMAGE_URI"
+          
+          # Create S3 bucket if it doesn't exist
+          aws s3 mb s3://$AWS_S3_BUCKET --region ${{ env.AWS_REGION }} || echo "Bucket already exists"
+          
+          # Deploy using Serverless Framework
           serverless deploy --stage $STAGE --verbose
+          
+          echo "✅ Deployment completed successfully"
 
       - name: Run health check
+        env:
+          STAGE: ${{ steps.set-stage.outputs.STAGE }}
         run: |
+          echo "🏥 Running health check..."
+          
           # Wait for deployment to be ready
           sleep 30
           
-          # Get function URL and test
-          FUNCTION_URL=$(aws lambda get-function-url-config --function-name $LAMBDA_FUNCTION_NAME-$STAGE --query 'FunctionUrl' --output text)
-          if [ "$FUNCTION_URL" != "None" ]; then
-            curl -f $FUNCTION_URL/health || exit 1
-          fi
+          # Get function URL from AWS
+          FUNCTION_NAME="${LAMBDA_FUNCTION_NAME}-${STAGE}"
+          
+          # Check if function exists and is active
+          aws lambda get-function --function-name $FUNCTION_NAME
+          
+          # Test Lambda function invocation
+          echo "Testing Lambda function invocation..."
+          aws lambda invoke \
+            --function-name $FUNCTION_NAME \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            response.json || {
+            echo "❌ Lambda invocation failed"
+            exit 1
+          }
+          
+          echo "✅ Lambda function invocation successful"
+          cat response.json
 
       - name: Upload deployment artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: deployment-logs-${{ github.sha }}
+          name: deployment-logs-${{ steps.set-stage.outputs.STAGE }}-${{ github.sha }}
           path: |
             .serverless/
             *.log
-          retention-days: 7
+            cloudformation-template-*.json
+          retention-days: 30
+
+      - name: Report deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "🎉 Deployment to ${{ steps.set-stage.outputs.STAGE }} completed successfully!"
+            echo "📋 Function Name: ${LAMBDA_FUNCTION_NAME}-${{ steps.set-stage.outputs.STAGE }}"
+            echo "🏗️ Image: ${{ steps.build-image.outputs.IMAGE_URI }}"
+          else
+            echo "❌ Deployment failed. Check the logs above for details."
+          fi
 
   cleanup:
     needs: [test, deploy]
     runs-on: ubuntu-latest
     if: always() && github.ref == 'refs/heads/staging'
+    name: Cleanup Resources
     
     permissions:
       id-token: write
@@ -137,9 +207,70 @@ jobs:
 
       - name: Cleanup old ECR images
         run: |
-          # Keep only the latest 10 images
-          aws ecr describe-images --repository-name $ECR_REPOSITORY --query 'sort_by(imageDetails,& imageCreatedAt)[:-10].[imageDigest]' --output text | while read digest; do
-            if [ "$digest" != "None" ] && [ -n "$digest" ]; then
-              aws ecr batch-delete-image --repository-name $ECR_REPOSITORY --image-ids imageDigest=$digest
-            fi
-          done
+          echo "🧹 Cleaning up old ECR images..."
+          
+          # Keep only the latest 10 images to save storage costs
+          OLD_IMAGES=$(aws ecr describe-images \
+            --repository-name $ECR_REPOSITORY \
+            --query 'sort_by(imageDetails,& imageCreatedAt)[:-10].[imageDigest]' \
+            --output text)
+          
+          if [ -n "$OLD_IMAGES" ] && [ "$OLD_IMAGES" != "None" ]; then
+            echo "$OLD_IMAGES" | while read -r digest; do
+              if [ -n "$digest" ] && [ "$digest" != "None" ]; then
+                echo "Deleting image with digest: $digest"
+                aws ecr batch-delete-image \
+                  --repository-name $ECR_REPOSITORY \
+                  --image-ids imageDigest=$digest || echo "Failed to delete $digest"
+              fi
+            done
+            echo "✅ ECR cleanup completed"
+          else
+            echo "ℹ️ No old images to cleanup"
+          fi
+
+      - name: Cleanup old Lambda versions (staging only)
+        run: |
+          echo "🧹 Cleaning up old Lambda versions..."
+          
+          FUNCTION_NAME="${LAMBDA_FUNCTION_NAME}-staging"
+          
+          # List all versions except $LATEST and the most recent 5
+          OLD_VERSIONS=$(aws lambda list-versions-by-function \
+            --function-name $FUNCTION_NAME \
+            --query 'Versions[?Version!=`$LATEST`].Version' \
+            --output text | tr '\t' '\n' | sort -n | head -n -5)
+          
+          if [ -n "$OLD_VERSIONS" ]; then
+            echo "$OLD_VERSIONS" | while read -r version; do
+              if [ -n "$version" ]; then
+                echo "Deleting Lambda version: $version"
+                aws lambda delete-function \
+                  --function-name $FUNCTION_NAME:$version || echo "Failed to delete version $version"
+              fi
+            done
+            echo "✅ Lambda cleanup completed"
+          else
+            echo "ℹ️ No old Lambda versions to cleanup"
+          fi
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'

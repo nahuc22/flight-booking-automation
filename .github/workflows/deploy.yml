@@ -10,15 +10,15 @@ env:
   AWS_REGION: us-east-2
   ECR_REPOSITORY: technical-test
   IMAGE_TAG: nahuel-latest
+  LAMBDA_FUNCTION_NAME: technical-lambda-test-nahuel
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: automation
     permissions:
+      id-token: write  # Necesario para OIDC
       contents: read
       packages: write
-      id-token: write
 
     steps:
     - name: Checkout code
@@ -29,8 +29,7 @@ jobs:
       with:
         aws-region: ${{ env.AWS_REGION }}
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: GitHubActions-Deploy-${{ github.run_id }}
-        role-duration-seconds: 3600
+        role-session-name: GitHubActions-Deploy
         audience: sts.amazonaws.com
 
     - name: Login to Amazon ECR
@@ -64,7 +63,6 @@ jobs:
     - name: Deploy with Serverless
       env:
         AWS_ECR_REPOSITORY_URL: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-        AWS_SERVICE_NAME: service-technical-test-nahuel
       run: |
         npx serverless deploy --verbose
 

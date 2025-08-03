@@ -131,7 +131,7 @@ npm run build:clean    # Clean and compile
 npm run dev            # Watch mode
 
 # Deployment
-npm run deploy:ecr     # Upload image to ECR
+npm run deploy:erc     # Upload image to ECR
 npm run deploy         # Deploy Lambda
 npm run remove         # Remove stack
 

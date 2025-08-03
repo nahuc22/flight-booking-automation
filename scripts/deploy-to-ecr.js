@@ -19,8 +19,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const AWS_ACCOUNT_ID = process.env.AWS_ACCOUNT_ID;
 const AWS_REGION = process.env.AWS_REGION;
 const AWS_ECR_REPOSITORY = process.env.AWS_ECR_REPOSITORY;
-const IMAGE_TAG = process.env.IMAGE_TAG || 'latest';
-const DOCKERFILE_PATH = process.env.DOCKERFILE_PATH || path.resolve(__dirname, '../Dockerfile');
+const IMAGE_TAG = process.env.IMAGE_TAG;
+const DOCKERFILE_PATH = process.env.DOCKERFILE_PATH || path.resolve(__dirname, '../Dockerfile.lambda');
 const UPDATE_LAMBDA = process.env.UPDATE_LAMBDA === 'true';
 
 // Make sure Dockerfile exists
@@ -68,7 +68,7 @@ async function main() {
     
     // Build Docker image
     console.log('\nBuilding Docker image...');
-    executeCommand(`docker build -t ${AWS_ECR_REPOSITORY}:${IMAGE_TAG} -f ${DOCKERFILE_PATH} .`, 
+    executeCommand(`docker build --platform linux/amd64 --provenance=false -t ${AWS_ECR_REPOSITORY}:${IMAGE_TAG} .`, 
       'Error building Docker image');
     console.log('Docker image built successfully');
     

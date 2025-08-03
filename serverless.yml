@@ -25,7 +25,7 @@ custom:
 functions:
   playwrightTest:
     image: ${env:AWS_ECR_REPOSITORY_URL, ''}:${env:IMAGE_TAG, ''}
-    name: ${env:AWS_LAMBDA_FUNCTION_NAME, ''}
+    name: ${env:AWS_LAMBDA_FUNCTION_NAME, ''}-${self:provider.stage}
     description: Playwright test for Aegean Air flight booking component
     events:
       - schedule:

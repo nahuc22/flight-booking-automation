@@ -74,6 +74,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: false
+          role-skip-session-tagging: true
 
       - name: Verify AWS Connection
         run: |

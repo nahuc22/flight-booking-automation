@@ -259,7 +259,8 @@ export const handler = async (
     await s3Client.send(uploadCommand);
 
     // Generate URL for the uploaded screenshot
-    screenshotUrl = `https://${bucketName}.s3.amazonaws.com/screenshots/${filename}`;
+    const region = process.env.AWS_REGION || "us-east-2";
+    screenshotUrl = `https://${bucketName}.s3.${region}.amazonaws.com/screenshots/${filename}`;
   } catch (error: any) {
     console.error("Error:", error);
     console.error("Stack trace:", error.stack);

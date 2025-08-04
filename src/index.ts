@@ -18,6 +18,58 @@ import {
 } from "./utils/constants";
 
 /**
+ * Validates the presence and functionality of booking form elements
+ * @param page - Playwright page instance
+ * @returns Object with validation results for each required element
+ */
+async function validateBookingFormElements(page: any) {
+  const results = {
+    tripTypeSelector: false,
+    passengersAndClassSelector: false,
+    originField: false,
+    destinationField: false,
+    departureDateSelector: false,
+    returnDateSelector: false,
+    searchButton: false,
+  };
+
+  try {
+    // Trip type selector (Round-trip/One-way)
+    const tripTypeSelector = await page.$('[data-testid="trip-type"], .trip-type, [name="trip-type"], .round-trip, .one-way');
+    results.tripTypeSelector = !!tripTypeSelector;
+
+    // Passengers and class selector
+    const passengersSelector = await page.$('[data-testid="passengers"], .passengers, [name="passengers"], .passenger-selector');
+    results.passengersAndClassSelector = !!passengersSelector;
+
+    // Origin field
+    const originField = await page.$('[data-testid="origin"], [name="origin"], .origin, [placeholder*="From"], [placeholder*="Origin"]');
+    results.originField = !!originField;
+
+    // Destination field
+    const destinationField = await page.$('[data-testid="destination"], [name="destination"], .destination, [placeholder*="To"], [placeholder*="Destination"]');
+    results.destinationField = !!destinationField;
+
+    // Departure date selector
+    const departureDateSelector = await page.$('[data-testid="departure-date"], [name="departure-date"], .departure-date, [type="date"]');
+    results.departureDateSelector = !!departureDateSelector;
+
+    // Return date selector
+    const returnDateSelector = await page.$('[data-testid="return-date"], [name="return-date"], .return-date');
+    results.returnDateSelector = !!returnDateSelector;
+
+    // Search button
+    const searchButton = await page.$('[data-testid="search"], .search-button, [type="submit"], button[class*="search"]');
+    results.searchButton = !!searchButton;
+
+  } catch (error: any) {
+    console.error('Error validating form elements:', error.message);
+  }
+
+  return results;
+}
+
+/**
  * AWS Lambda handler function for automated web screenshot capture and S3 storage.
  *
  * This function automates the process of taking screenshots of specific web elements
@@ -125,6 +177,7 @@ export const handler = async (
   let screenshotUrl: string | null = null;
   let statusCode = 200;
   let message = "Success";
+  let validationResults: any = null;
 
   try {
     // Ensure necessary directories exist
@@ -158,6 +211,9 @@ export const handler = async (
       timeout: TIMEOUT_SELECTOR,
     });
 
+    // Validate booking form elements as per requirements
+    validationResults = await validateBookingFormElements(page);
+    
     // Take screenshot of the specific element
     const element = await page.$(PARAMETERS.selector);
 
@@ -230,6 +286,7 @@ export const handler = async (
       message,
       timestamp: new Date().toISOString(),
       screenshotUrl,
+      validationResults: statusCode === 200 ? validationResults : null,
       event,
     }),
   };
